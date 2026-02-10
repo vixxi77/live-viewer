@@ -12,7 +12,10 @@
 static char *inject_script = "\n<script data-live-viewer>\n"" console.log(\"yooo\");\n""</script>\n";
 
 int socket_init(struct sockaddr_in *address);
-void socket_loop(int socketfd);
+void socket_loop(int socketfd, char *filename);
+char *read_file(const char *filename, size_t *file_size);
+
+
 
 int main(int argc, char *argv[]){
 	if(argc < 2){
@@ -38,8 +41,9 @@ int main(int argc, char *argv[]){
 	//snprintf(command, sizeof(command), "xdg-open %s/%s", current_directory, argv[1]);
 	snprintf(command, sizeof(command), "xdg-open http://127.0.0.1:%d", DEFAULT_PORT);
 	system(command);
+	printf("SERVER OPEN AT: 127.0.0.1:%d\n", DEFAULT_PORT);
 
-	socket_loop(socketfd);
+	socket_loop(socketfd, argv[1]);
 	close(socketfd);
 	return 0;
 }
@@ -67,18 +71,47 @@ int socket_init(struct sockaddr_in *address){
 	return socketfd;
 }
 
-void socket_loop(int socketfd){
-	const char *html = "<html><body>TEST</body></html>";
+void socket_loop(int socketfd, char *filename){
 	while(1){
 		int clientfd = accept(socketfd, NULL, NULL);
+
+		size_t size;
+		char *html = read_file(filename, &size);
+		if(!html){
+			close(clientfd);
+			return;
+		}
 		if(clientfd >= 0){
-			char header_buffer[1024];
+			char header_buffer[512];
 			int header_len = snprintf(header_buffer, sizeof(header_buffer), "HTTP/1.1 200 OK\r\n""Content-Type: text/html\r\n""Content-Length: %zu\r\n""\r\n", strlen(html));
 			send(clientfd, header_buffer, header_len, 0);
 			send(clientfd, html, strlen(html), 0);
+
+			free(html);
 			close(clientfd);
 		}
 
 	}
 }
 
+char *read_file(const char *filename, size_t *file_size){
+	FILE *file = fopen(filename, "rb");
+	if(!file){
+		return NULL;
+	}
+
+	fseek(file, 0, SEEK_END);
+	long size = ftell(file);
+	rewind(file);
+
+	char *data = malloc(size + 1);
+	if(!data){
+		return NULL;
+	}
+
+	fread(data, 1, size, file);
+	fclose(file);
+
+	*file_size = size;
+	return data;
+}
