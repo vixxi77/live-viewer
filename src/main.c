@@ -3,6 +3,17 @@
 #include <unistd.h>
 #include <string.h>
 
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
+#define DEFAULT_PORT 9090
+
+static char *inject_script = "\n<script data-live-viewer>\n"" console.log(\"yooo\");\n""</script>\n";
+
+int socket_init(struct sockaddr_in *address);
+void socket_loop(int socketfd);
+
 int main(int argc, char *argv[]){
 	if(argc < 2){
 		printf("Usage: $live-viewer <HTML FILE NAME> \n");
@@ -16,12 +27,58 @@ int main(int argc, char *argv[]){
 		printf("COMMANDS:    stop               <stops the process> \n");
 		return 1;
 	}
-	
+
+	struct sockaddr_in address;
+	int socketfd = socket_init(&address);
+	if(socketfd == -1) return -1;
 
 	char current_directory[4096];
 	getcwd(current_directory, sizeof(current_directory));
 	char command[5016];
-	snprintf(command, sizeof(command), "xdg-open %s/%s", current_directory, argv[1]);
+	//snprintf(command, sizeof(command), "xdg-open %s/%s", current_directory, argv[1]);
+	snprintf(command, sizeof(command), "xdg-open http://127.0.0.1:%d", DEFAULT_PORT);
 	system(command);
+
+	socket_loop(socketfd);
+	close(socketfd);
 	return 0;
 }
+
+int socket_init(struct sockaddr_in *address){
+	int socketfd = socket(AF_INET, SOCK_STREAM, 0);
+	if(socketfd == -1){
+		return -1;
+	}
+
+	address->sin_family = AF_INET;
+	address->sin_port = htons(DEFAULT_PORT);
+	address->sin_addr.s_addr = 0;
+
+	if(bind(socketfd, (struct sockaddr*)address, sizeof(*address)) == -1){
+		close(socketfd);
+		return -1;
+	}
+
+	if(listen(socketfd, 1) == -1){
+		close(socketfd);
+		return -1;
+	}
+
+	return socketfd;
+}
+
+void socket_loop(int socketfd){
+	const char *html = "<html><body>TEST</body></html>";
+	while(1){
+		int clientfd = accept(socketfd, NULL, NULL);
+		if(clientfd >= 0){
+			char header_buffer[1024];
+			int header_len = snprintf(header_buffer, sizeof(header_buffer), "HTTP/1.1 200 OK\r\n""Content-Type: text/html\r\n""Content-Length: %zu\r\n""\r\n", strlen(html));
+			send(clientfd, header_buffer, header_len, 0);
+			send(clientfd, html, strlen(html), 0);
+			close(clientfd);
+		}
+
+	}
+}
+
