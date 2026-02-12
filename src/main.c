@@ -3,6 +3,8 @@
 #include <unistd.h>
 #include <string.h>
 
+#include <pthread.h>
+
 #include <sys/wait.h>
 
 #include <sys/inotify.h>
@@ -20,6 +22,12 @@ void socket_loop(int socketfd, char *filename);
 char *read_file(const char *filename, size_t *file_size);
 void open_browser(void);
 char *current_directory(char *buffer, char* filename, size_t size);
+void *inotify_watcher(void *arg);
+
+typedef struct {
+	char *directory;
+	int read_flag;
+} program_ctx;
 
 char *current_directory(char *buffer, char* filename, size_t size){
 	if(getcwd(buffer, size) == NULL) return NULL;
@@ -28,6 +36,25 @@ char *current_directory(char *buffer, char* filename, size_t size){
 	snprintf(buffer + len, size - len, "/%s", filename);
 	return buffer;
 }
+
+void *inotify_watcher(void *arg){
+	int inotifyfd = inotify_init();
+	program_ctx *context = (program_ctx*)arg;
+	char *directory = (char*)context->directory;
+
+	printf("inotify thread started... working directory is: %s \n", directory);
+
+	if(inotifyfd < 0){
+		printf("inotify failure \n");
+		close(inotifyfd);
+		return NULL;
+	}
+	int inotifywd = inotify_add_watch(inotifyfd, directory, IN_MODIFY);
+	while(1){
+		
+	}
+}
+
 
 int main(int argc, char *argv[]){
 	if(argc < 2){
@@ -42,27 +69,32 @@ int main(int argc, char *argv[]){
 		printf("COMMANDS:    stop               <stops the process> \n");
 		return 1;
 	}
+	program_ctx context = {0};
 
 	char current_d_buffer[4096];
 	char *directory = current_directory(current_d_buffer, argv[1], sizeof(current_d_buffer)); 
+	context.directory = directory;
 
 	if(directory == NULL){
 		printf("cant find directory \n");
 		return -1;
-	}else{
-		printf("%s \n", directory);
 	}
 
 	struct sockaddr_in address;
 	int socketfd = socket_init(&address);
-	if(socketfd == -1){
-		printf("sokcet failure");
+	if(socketfd < 0){
+		printf("sokcet failure \n");
 		close(socketfd);
 		return -1;
 	};
 	printf("SERVER OPEN AT: 127.0.0.1:%d\n", DEFAULT_PORT);
 
-	
+	pthread_t inotify_thread;
+	pthread_create(&inotify_thread, NULL, inotify_watcher, &context);
+
+
+
+
 	
 	open_browser();
 
@@ -71,6 +103,7 @@ int main(int argc, char *argv[]){
 	}
 
 	close(socketfd);
+	pthread_join(inotify_thread, NULL);
 	return 0;
 }
 
