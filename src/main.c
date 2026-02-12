@@ -19,7 +19,15 @@ int socket_init(struct sockaddr_in *address);
 void socket_loop(int socketfd, char *filename);
 char *read_file(const char *filename, size_t *file_size);
 void open_browser(void);
+char *current_directory(char *buffer, char* filename, size_t size);
 
+char *current_directory(char *buffer, char* filename, size_t size){
+	if(getcwd(buffer, size) == NULL) return NULL;
+	size_t len = strlen(buffer);
+	
+	snprintf(buffer + len, size - len, "/%s", filename);
+	return buffer;
+}
 
 int main(int argc, char *argv[]){
 	if(argc < 2){
@@ -34,7 +42,16 @@ int main(int argc, char *argv[]){
 		printf("COMMANDS:    stop               <stops the process> \n");
 		return 1;
 	}
-	printf("here before server creation \n");
+
+	char current_d_buffer[4096];
+	char *directory = current_directory(current_d_buffer, argv[1], sizeof(current_d_buffer)); 
+
+	if(directory == NULL){
+		printf("cant find directory \n");
+		return -1;
+	}else{
+		printf("%s \n", directory);
+	}
 
 	struct sockaddr_in address;
 	int socketfd = socket_init(&address);
@@ -45,11 +62,8 @@ int main(int argc, char *argv[]){
 	};
 	printf("SERVER OPEN AT: 127.0.0.1:%d\n", DEFAULT_PORT);
 
-	/*
-	char current_directory[4096];
-	getcwd(current_directory, sizeof(current_directory));
-	//snprintf(command, sizeof(command), "xdg-open %s/%s", current_directory, argv[1]);
-	*/
+	
+	
 	open_browser();
 
 	while(1){
