@@ -1,7 +1,10 @@
+#define _POSIX_C_SOURCE 199309L
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+
+#include <time.h>
 
 #include <pthread.h>
 
@@ -19,7 +22,15 @@
 #define EVENT_SIZE  ( sizeof (struct inotify_event) )
 #define EVENT_BUF_LEN     ( 1024 * ( EVENT_SIZE + 16 ) )
 
-static char *inject_script = "\n<script data-live-viewer>\n""(() => {\n"" const es = new EventSource('/events');\n"" es.onmessage = (e) => {if (e.data === 'reload') location.reload();};\n""})();\n""</script>\n";
+static char *inject_script = "\n<link rel=\"icon\" href=\"data:,\">"
+			     "\n<script data-live-viewer>\n"
+			     "window.addEventListener('load', function() {\n"
+			     "  const es = new EventSource('/events');\n"
+			     "  es.onmessage = function(e) {\n"
+			     "    if (e.data === 'reload') location.reload();\n"
+			     "  };\n"
+			     "});\n"
+			     "</script>\n";
 
 typedef struct {
 	char *directory_path;
@@ -171,7 +182,7 @@ int socket_init(struct sockaddr_in *address){
 		return -1;
 	}
 
-	if(listen(socketfd, 1) == -1){
+	if(listen(socketfd, 16) == -1){
 		close(socketfd);
 		return -1;
 	}
@@ -190,9 +201,43 @@ void socket_loop(int socketfd, char *filename, int *read_flag){
 		}
 		request[receive_size] = '\0';
 
-		if(__atomic_exchange_n(read_flag, 0, __ATOMIC_SEQ_CST) == 1){
-			printf("gonna reload \n");
+
+		if(strstr(request, "GET /events")){
+			const char *header = "HTTP/1.1 200 OK\r\n"
+					     "Content-Type: text/event-stream\r\n"
+					     "Cache-Control: no-cache\r\n"
+					     "Connection: keep-alive\r\n\r\n";
+
+			send(clientfd, header, strlen(header), 0);
+			
+			const char *initial = ": connected\n\n";
+			send(clientfd, initial, strlen(initial), 0);
+
+			int tick = 0;
+			while(1){
+				if(__atomic_exchange_n(read_flag, 0, __ATOMIC_SEQ_CST) == 1){
+					const char *message = "data: reload\n\n";
+					if(send(clientfd, message, strlen(message), 0) <= 0){
+						printf("cleint dc during reload \n");
+						break;
+					};
+					printf("gonna reload \n");
+					break;
+				}
+				if(++tick % 15 == 0){
+					const char *keepalive = ": keepalive\n\n";
+					if(send(clientfd, keepalive, strlen(keepalive), 0) <= 0){
+						printf("Client disconnected during keepalive\n");
+						break;
+					}
+				}
+				struct timespec ts = {1, 0};
+				nanosleep(&ts, NULL);
+			}
+			close(clientfd);
+			return;
 		}
+
 
 		if(strstr(request, "GET / ") || strstr(request, "GET /index")){
 			size_t size;
@@ -221,13 +266,13 @@ void socket_loop(int socketfd, char *filename, int *read_flag){
 				int header_len = snprintf(header_buffer, sizeof(header_buffer), 
 							  "HTTP/1.1 200 OK\r\n"
 							  "Content-Type: text/html\r\n"
-							  "Content-Length: %zu\r\n""\r\n", size);
+							  "Content-Length: %zu\r\n""\r\n", out_len);
 
 				send(clientfd, header_buffer, header_len, 0);
-				send(clientfd, html, size, 0);
+				send(clientfd, out, out_len, 0);
 
 			}
-			free(html);
+			free(out);
 			close(clientfd);
 			return;
 		}
