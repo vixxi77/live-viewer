@@ -161,7 +161,7 @@ void open_browser(void){
 		_exit(1);
 	}
 
-	//collect this damn orphan so he dont litter
+	//collect this damn orphan so he dont litter >:(
 	if(waitpid(pid, NULL, 0) < 0){
 		perror("i just cant man \n");
 		return;
