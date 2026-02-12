@@ -19,15 +19,7 @@
 #define EVENT_SIZE  ( sizeof (struct inotify_event) )
 #define EVENT_BUF_LEN     ( 1024 * ( EVENT_SIZE + 16 ) )
 
-//static char *inject_script = "\n<script data-live-viewer>\n"" console.log(\"yooo\");\n""</script>\n";
-
-int socket_init(struct sockaddr_in *address);
-void socket_loop(int socketfd, char *filename);
-char *read_file(const char *filename, size_t *file_size);
-void open_browser(void);
-char *current_directory(char *buffer, size_t size);
-void *inotify_watcher(void *arg);
-struct inotify_event *inotify_wait(char* buffer, struct inotify_event *event, int len);
+static char *inject_script = "\n<script data-live-viewer>\n""(() => {\n"" const es = new EventSource('/events');\n"" es.onmessage = (e) => {if (e.data === 'reload') location.reload();};\n""})();\n""</script>\n";
 
 typedef struct {
 	char *directory_path;
@@ -35,6 +27,15 @@ typedef struct {
 	int read_flag;
 	int running;
 } program_ctx;
+
+int socket_init(struct sockaddr_in *address);
+void socket_loop(int socketfd, char *filename, int *read_flag);
+char *read_file(const char *filename, size_t *file_size);
+void open_browser(void);
+char *current_directory(char *buffer, size_t size);
+void *inotify_watcher(void *arg);
+struct inotify_event *inotify_wait(char* buffer, struct inotify_event *event, int len);
+
 
 char *current_directory(char *buffer, size_t size){
 	if(getcwd(buffer, size) == NULL) return NULL;
@@ -56,7 +57,6 @@ void *inotify_watcher(void *arg){
 	program_ctx *context = (program_ctx*)arg;
 	char *directory_path = (char*)context->directory_path;
 	char *filename = (char*)context->filename;
-	int running = (int)context->running;
 	struct inotify_event *event = NULL;
 	int mask = IN_CLOSE_WRITE;
 
@@ -75,7 +75,7 @@ void *inotify_watcher(void *arg){
 
 	char event_buffer[EVENT_BUF_LEN];
 	int len;
-	while(running){
+	while(context->running){
 		len = read(inotifyfd, event_buffer, sizeof(event_buffer));
 		if(len == -1){
 			printf("cant read from queue \n");
@@ -85,13 +85,14 @@ void *inotify_watcher(void *arg){
 		event = NULL;
 		while((event = inotify_wait(event_buffer, event, len)) != NULL){
 			if(event->len > 0 && strcmp(event->name, filename) == 0){
-				if(event->mask & (IN_CLOSE_WRITE)){
-					printf("file was modified brudda \n");
+				if((event->mask & IN_CLOSE_WRITE)){
+						__atomic_store_n(&context->read_flag, 1, __ATOMIC_SEQ_CST);
+						printf("file was modified brudda \n");
 				}
 			}
 		}
 	}
-
+	printf("exited \n");
 	inotify_rm_watch(inotifyfd, inotifywd);
 	close(inotifyfd);
 	return NULL;
@@ -132,18 +133,14 @@ int main(int argc, char *argv[]){
 	};
 	printf("SERVER OPEN AT: 127.0.0.1:%d\n", DEFAULT_PORT);
 
-	pthread_t inotify_thread;
-	pthread_create(&inotify_thread, NULL, inotify_watcher, &context);
-
-
-
-
-	
 	open_browser();
 
 	context.running = 1;
+	pthread_t inotify_thread;
+	pthread_create(&inotify_thread, NULL, inotify_watcher, &context);
+
 	while(1){
-		socket_loop(socketfd, argv[1]);
+		socket_loop(socketfd, argv[1], &context.read_flag);
 	}
 	context.running = 0;
 
@@ -182,11 +179,20 @@ int socket_init(struct sockaddr_in *address){
 	return socketfd;
 }
 
-void socket_loop(int socketfd, char *filename){
+void socket_loop(int socketfd, char *filename, int *read_flag){
 		int clientfd = accept(socketfd, NULL, NULL);
 
 		char request[4096];
-		recv(clientfd, request, sizeof(request) - 1, 0);
+		int receive_size = recv(clientfd, request, sizeof(request) - 1, 0);
+		if(receive_size <= 0){
+			close(clientfd);
+			return;
+		}
+		request[receive_size] = '\0';
+
+		if(__atomic_exchange_n(read_flag, 0, __ATOMIC_SEQ_CST) == 1){
+			printf("gonna reload \n");
+		}
 
 		if(strstr(request, "GET / ") || strstr(request, "GET /index")){
 			size_t size;
@@ -195,6 +201,20 @@ void socket_loop(int socketfd, char *filename){
 				close(clientfd);
 				return;
 			}
+
+			size_t inject_len = strlen(inject_script);
+			size_t out_len = size + inject_len;
+			char *out = malloc(out_len + 1);
+			if(!out){
+				free(html);
+				close(clientfd);
+				return;
+			}
+
+			memcpy(out, html, size);
+			memcpy(out + size, inject_script, inject_len);
+			out[out_len] = '\0';
+			free(html);
 
 			if(clientfd >= 0){
 				char header_buffer[512];
@@ -208,8 +228,9 @@ void socket_loop(int socketfd, char *filename){
 
 			}
 			free(html);
+			close(clientfd);
+			return;
 		}
-		close(clientfd);
 }
 
 char *read_file(const char *filename, size_t *file_size){
