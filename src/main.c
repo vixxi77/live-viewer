@@ -15,44 +15,86 @@
 
 #define DEFAULT_PORT 9090
 
+//this not mine 
+#define EVENT_SIZE  ( sizeof (struct inotify_event) )
+#define EVENT_BUF_LEN     ( 1024 * ( EVENT_SIZE + 16 ) )
+
 //static char *inject_script = "\n<script data-live-viewer>\n"" console.log(\"yooo\");\n""</script>\n";
 
 int socket_init(struct sockaddr_in *address);
 void socket_loop(int socketfd, char *filename);
 char *read_file(const char *filename, size_t *file_size);
 void open_browser(void);
-char *current_directory(char *buffer, char* filename, size_t size);
+char *current_directory(char *buffer, size_t size);
 void *inotify_watcher(void *arg);
+struct inotify_event *inotify_wait(char* buffer, struct inotify_event *event, int len);
 
 typedef struct {
-	char *directory;
+	char *directory_path;
+	char *filename;
 	int read_flag;
+	int running;
 } program_ctx;
 
-char *current_directory(char *buffer, char* filename, size_t size){
+char *current_directory(char *buffer, size_t size){
 	if(getcwd(buffer, size) == NULL) return NULL;
-	size_t len = strlen(buffer);
-	
-	snprintf(buffer + len, size - len, "/%s", filename);
 	return buffer;
+}
+
+struct inotify_event *inotify_wait(char* buffer, struct inotify_event *event, int len){
+	char *i = event == NULL?buffer:(char*)event + sizeof(struct inotify_event) + event->len;
+
+	if(i >= (buffer + len)){
+		return NULL;
+	}
+
+	return (struct inotify_event *)i;
 }
 
 void *inotify_watcher(void *arg){
 	int inotifyfd = inotify_init();
 	program_ctx *context = (program_ctx*)arg;
-	char *directory = (char*)context->directory;
+	char *directory_path = (char*)context->directory_path;
+	char *filename = (char*)context->filename;
+	int running = (int)context->running;
+	struct inotify_event *event = NULL;
+	int mask = IN_CLOSE_WRITE;
 
-	printf("inotify thread started... working directory is: %s \n", directory);
+	printf("inotify thread started... working directory is: %s \n", directory_path);
 
 	if(inotifyfd < 0){
 		printf("inotify failure \n");
 		close(inotifyfd);
 		return NULL;
 	}
-	int inotifywd = inotify_add_watch(inotifyfd, directory, IN_MODIFY);
-	while(1){
-		
+	int inotifywd = inotify_add_watch(inotifyfd, directory_path, mask);
+	if(inotifywd < 0){
+		printf("inotify watch desrciptor failure \n");
+		return NULL;
 	}
+
+	char event_buffer[EVENT_BUF_LEN];
+	int len;
+	while(running){
+		len = read(inotifyfd, event_buffer, sizeof(event_buffer));
+		if(len == -1){
+			printf("cant read from queue \n");
+			return NULL;
+		}
+
+		event = NULL;
+		while((event = inotify_wait(event_buffer, event, len)) != NULL){
+			if(event->len > 0 && strcmp(event->name, filename) == 0){
+				if(event->mask & (IN_CLOSE_WRITE)){
+					printf("file was modified brudda \n");
+				}
+			}
+		}
+	}
+
+	inotify_rm_watch(inotifyfd, inotifywd);
+	close(inotifyfd);
+	return NULL;
 }
 
 
@@ -72,8 +114,9 @@ int main(int argc, char *argv[]){
 	program_ctx context = {0};
 
 	char current_d_buffer[4096];
-	char *directory = current_directory(current_d_buffer, argv[1], sizeof(current_d_buffer)); 
-	context.directory = directory;
+	char *directory = current_directory(current_d_buffer, sizeof(current_d_buffer)); 
+	context.directory_path = directory;
+	context.filename = argv[1];
 
 	if(directory == NULL){
 		printf("cant find directory \n");
@@ -98,9 +141,11 @@ int main(int argc, char *argv[]){
 	
 	open_browser();
 
+	context.running = 1;
 	while(1){
 		socket_loop(socketfd, argv[1]);
 	}
+	context.running = 0;
 
 	close(socketfd);
 	pthread_join(inotify_thread, NULL);
