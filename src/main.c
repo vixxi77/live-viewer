@@ -213,7 +213,6 @@ void socket_loop(int socketfd, char *filename, int *read_flag){
 			const char *initial = ": connected\n\n";
 			send(clientfd, initial, strlen(initial), 0);
 
-			int tick = 0;
 			while(1){
 				if(__atomic_exchange_n(read_flag, 0, __ATOMIC_SEQ_CST) == 1){
 					const char *message = "data: reload\n\n";
@@ -224,14 +223,7 @@ void socket_loop(int socketfd, char *filename, int *read_flag){
 					printf("gonna reload \n");
 					break;
 				}
-				if(++tick % 15 == 0){
-					const char *keepalive = ": keepalive\n\n";
-					if(send(clientfd, keepalive, strlen(keepalive), 0) <= 0){
-						printf("Client disconnected during keepalive\n");
-						break;
-					}
-				}
-				struct timespec ts = {1, 0};
+				struct timespec ts = {0, 20 * 1000 * 1000};
 				nanosleep(&ts, NULL);
 			}
 			close(clientfd);
@@ -276,6 +268,26 @@ void socket_loop(int socketfd, char *filename, int *read_flag){
 			close(clientfd);
 			return;
 		}
+
+		if(strstr(request, "GET /") && !strstr(request, "GET /events")){
+			char filepath[512];
+			sscanf(request, "GET /%511s", filepath);
+
+			size_t size;
+			char *data = read_file(filepath, &size);
+			if(data){
+				char header[256];
+				snprintf(header, sizeof(header), "HTTP/1.1 200 OK\r\n"
+						                 "Content-Length: %zu\r\n\r\n", size);
+				send(clientfd, header, strlen(header), 0);
+				send(clientfd, data, size, 0);
+				free(data);
+			}else{
+				const char *notfound= "HTTP/1.1 404 Not Found\r\n\r\n";
+				send(clientfd, notfound, strlen(notfound), 0);
+			}
+		}
+	close(clientfd);
 }
 
 char *read_file(const char *filename, size_t *file_size){
