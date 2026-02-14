@@ -9,28 +9,76 @@
             font-family: Arial, sans-serif;
             text-align: center;
             padding: 50px;
-            background-color: #f5f5f5;
+            background-color: #000000;
         }
         h1 {
-            color: #333;
+            color: #ff0000;
+		background: linear-gradient(30deg, #f00000, #0f0000, #00f000, #000f00, #0000f0, #00000f);
+		background-size: 300%;
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		 animation: textGradient 0.2s ease infinite;
+        }
+	
+	@keyframes textGradient {
+		0% { background-position: 0%; }
+		50% { background-position: 100%; }
+		100% { background-position: 0%; }
         }
         p {
-            color: #666;
+		background: linear-gradient(90deg, #ff0000, #00ff00, #0000ff);
+		background-size: 300%;
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		 animation: textGradient 5s ease infinite;
         }
+	
+	@keyframes textGradient {
+		0% { background-position: 0%; }
+		50% { background-position: 100%; }
+		100% { background-position: 0%; }
+	}
         button {
             padding: 10px 20px;
             font-size: 16px;
             cursor: pointer;
         }
+	img {
+		display: block;
+		margin: 0 auto;
+	}
     </style>
 </head>
+<script>
+document.getElementById("loadBtn").addEventListener("click", function () {
+    const container = document.getElementById("imageContainer");
 
+    // Check if image already exists
+    let img = document.getElementById("dynamicImage");
+
+    if (!img) {
+        img = document.createElement("img");
+        img.id = "dynamicImage";
+        img.width = 300;
+        container.appendChild(img);
+    }
+
+    img.src = "misc/crazybobber.jpg";
+});
+</script>
 <body>
-    <h1>Hello to a very advanced page</h1>
-    <p>This is a very basic HTML page.</p>
-    <button onclick="alert('AR BUSI MANO?')">do NOT click me</button>
+    <h1>A BUS GARGALIOOOO!!!111!</h1>
+    <p>Im crying who is bro </p>
+    <button id="loadBtn">do NOT click me</button>
     <h3>DINOZAURAS</h3>
-    <img src="misc/crazybobber.jpg" width="600">
+    <img src="misc/skull.gif" width="300">
+    <div id="imageContainer"></div>
+    <h1>A MAN NIEKAS NEDAVE GARGALIOOOO!!!111!</h1>
+    <p>Im crying who is bro </p>
+    <button id="loadBtn">do NOT click me</button>
+    <h3>DINOZAURAS</h3>
+    <img src="misc/skull.gif" width="300">
+    <div id="imageContainer"></div>
 </body>
 </html>
 

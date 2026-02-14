@@ -144,7 +144,7 @@ int main(int argc, char *argv[]){
 	};
 	printf("SERVER OPEN AT: 127.0.0.1:%d\n", DEFAULT_PORT);
 
-	open_browser();
+	//open_browser();
 
 	context.running = 1;
 	pthread_t inotify_thread;
@@ -200,6 +200,7 @@ void socket_loop(int socketfd, char *filename, int *read_flag){
 			return;
 		}
 		request[receive_size] = '\0';
+		printf("%s \n", request);
 
 
 		if(strstr(request, "GET /events")){
@@ -231,7 +232,7 @@ void socket_loop(int socketfd, char *filename, int *read_flag){
 		}
 
 
-		if(strstr(request, "GET / ") || strstr(request, "GET /index")){
+		if(strstr(request, "GET / ")){
 			size_t size;
 			char *html = read_file(filename, &size);
 			if(!html){
@@ -262,14 +263,13 @@ void socket_loop(int socketfd, char *filename, int *read_flag){
 
 				send(clientfd, header_buffer, header_len, 0);
 				send(clientfd, out, out_len, 0);
-
 			}
 			free(out);
 			close(clientfd);
 			return;
 		}
 
-		if(strstr(request, "GET /") && !strstr(request, "GET /events")){
+		if(strstr(request, "GET /") && !strstr(request, "GET /events") && !strstr(request, "GET / ")){
 			char filepath[512];
 			sscanf(request, "GET /%511s", filepath);
 
@@ -287,7 +287,7 @@ void socket_loop(int socketfd, char *filename, int *read_flag){
 				send(clientfd, notfound, strlen(notfound), 0);
 			}
 		}
-	close(clientfd);
+		close(clientfd);
 }
 
 char *read_file(const char *filename, size_t *file_size){
