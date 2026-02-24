@@ -169,6 +169,7 @@ int socket_init(struct sockaddr_in *address){
 	int option = 1;
 	if(setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option)) == -1 ){
 		perror("reuse address failed? \n");
+		close(socketfd);
 		return -1;
 	}
 
