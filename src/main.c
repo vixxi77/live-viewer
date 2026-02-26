@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <errno.h>
 
 #include <time.h>
 
@@ -12,11 +13,15 @@
 
 #include <sys/inotify.h>
 
+#include <sys/epoll.h>
+
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <fcntl.h>
 
 #define DEFAULT_PORT 9090
+#define MAX_EVENTS 10
 
 #define EVENT_SIZE  ( sizeof (struct inotify_event) )
 #define EVENT_BUF_LEN     ( 1024 * ( EVENT_SIZE + 16 ) )
@@ -45,6 +50,7 @@ void open_browser(void);
 char *current_directory(char *buffer, size_t size);
 void *inotify_watcher(void *arg);
 struct inotify_event *inotify_wait(char* buffer, struct inotify_event *event, int len);
+int set_nonblocking(int socketfd);
 
 
 char *current_directory(char *buffer, size_t size){
@@ -137,10 +143,26 @@ int main(int argc, char *argv[]){
 	struct sockaddr_in address;
 	int socketfd = socket_init(&address);
 	if(socketfd < 0){
-		printf("sokcet failure \n");
-		close(socketfd);
+		printf("socket failure \n");
 		return -1;
 	};
+
+
+
+	int epollfd = epoll_create1(0);
+	if(epollfd == -1){
+		printf("failed to create epoll fd \n");
+		return -1;
+	}
+	struct epoll_event event;
+	event.events = EPOLLIN;
+	event.data.fd = socketfd;
+	if(epoll_ctl(epollfd, EPOLL_CTL_ADD, socketfd, &event) == -1){
+		printf("epoll_ctl, socketfd");
+		return -1;
+	}
+
+
 	printf("SERVER OPEN AT: 127.0.0.1:%d\n", DEFAULT_PORT);
 
 	//open_browser();
@@ -149,8 +171,29 @@ int main(int argc, char *argv[]){
 	pthread_t inotify_thread;
 	pthread_create(&inotify_thread, NULL, inotify_watcher, &context);
 
+
+	struct epoll_event events[MAX_EVENTS];
 	while(1){
-		socket_loop(socketfd, argv[1], &context.read_flag);
+		int n_events = epoll_wait(epollfd, events, MAX_EVENTS, -1);
+		if(n_events == -1){
+			printf("epoll_wait failed \n");
+			return -1;
+		}
+		
+		for(int i = 0; i < n_events; i++){
+			if(events[i].data.fd == socketfd){
+				while(1){
+					int clientfd = accept(socketfd, NULL, NULL);
+					if(clientfd == -1){
+						if(errno == EAGAIN || errno == EWOULDBLOCK) break;
+						perror("failed to accept client \n");
+						break;
+					}
+					socket_loop(clientfd, argv[1], &context.read_flag);
+				}
+			}
+		}
+
 	}
 	context.running = 0;
 
@@ -182,6 +225,8 @@ int socket_init(struct sockaddr_in *address){
 		return -1;
 	}
 
+	set_nonblocking(socketfd);
+
 	if(listen(socketfd, 16) == -1){
 		close(socketfd);
 		return -1;
@@ -190,8 +235,20 @@ int socket_init(struct sockaddr_in *address){
 	return socketfd;
 }
 
-void socket_loop(int socketfd, char *filename, int *read_flag){
-		int clientfd = accept(socketfd, NULL, NULL);
+int set_nonblocking(int socketfd){
+		int flags = fcntl(socketfd, F_GETFL, 0);
+		if(flags == -1) {
+			printf("failed to get file descriptor \n");
+			return -1;
+		}
+		if(fcntl(socketfd, F_SETFL, flags | O_NONBLOCK) == -1) {
+			printf("failed settinf file control flags \n");
+			return -1;
+		}
+		return 0;
+}
+
+void socket_loop(int clientfd, char *filename, int *read_flag){
 
 		char request[4096];
 		int receive_size = recv(clientfd, request, sizeof(request) - 1, 0);
