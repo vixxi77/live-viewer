@@ -18,7 +18,6 @@
 
 #define DEFAULT_PORT 9090
 
-//this not mine 
 #define EVENT_SIZE  ( sizeof (struct inotify_event) )
 #define EVENT_BUF_LEN     ( 1024 * ( EVENT_SIZE + 16 ) )
 
