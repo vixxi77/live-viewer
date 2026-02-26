@@ -23,6 +23,11 @@
 #define DEFAULT_PORT 9090
 #define MAX_EVENTS 10
 
+
+#define MAX_CLIENTS 64
+int clients[MAX_CLIENTS];
+int client_count = 0;
+
 #define EVENT_SIZE  ( sizeof (struct inotify_event) )
 #define EVENT_BUF_LEN     ( 1024 * ( EVENT_SIZE + 16 ) )
 
@@ -43,8 +48,11 @@ typedef struct {
 	int running;
 } program_ctx;
 
+void client_add(int clientfd);
+void client_broadcast(void);
+
 int socket_init(struct sockaddr_in *address);
-void socket_loop(int socketfd, char *filename, int *read_flag);
+void socket_loop(int socketfd, char *filename);
 char *read_file(const char *filename, size_t *file_size);
 void open_browser(void);
 char *current_directory(char *buffer, size_t size);
@@ -52,6 +60,27 @@ void *inotify_watcher(void *arg);
 struct inotify_event *inotify_wait(char* buffer, struct inotify_event *event, int len);
 int set_nonblocking(int socketfd);
 
+
+void client_add(int clientfd){
+	if(client_count < MAX_CLIENTS){
+		clients[client_count++] = clientfd;
+	}else{
+		close(clientfd);
+	}
+}
+
+void client_broadcast(void){
+	const char *reload_message = "data: reload\n\n";
+	for(int i = 0; i < client_count;){
+
+		if(send(clients[i], reload_message, strlen(reload_message), 0) <= 0){
+
+			close(clients[i]);
+			clients[i] = clients[client_count--];
+
+		}else i++;
+	}
+}
 
 char *current_directory(char *buffer, size_t size){
 	if(getcwd(buffer, size) == NULL) return NULL;
@@ -179,6 +208,10 @@ int main(int argc, char *argv[]){
 			printf("epoll_wait failed \n");
 			return -1;
 		}
+
+		if(__atomic_exchange_n(&context.read_flag, 0, __ATOMIC_SEQ_CST) == 1){
+			client_broadcast();
+		}
 		
 		for(int i = 0; i < n_events; i++){
 			if(events[i].data.fd == socketfd){
@@ -190,9 +223,9 @@ int main(int argc, char *argv[]){
 						break;
 					}
 					set_nonblocking(clientfd);
-					socket_loop(clientfd, argv[1], &context.read_flag);
+					socket_loop(clientfd, argv[1]);
 					
-					event.events = EPOLLIN | EPOLLET;
+					event.events = EPOLLIN;
 					event.data.fd = clientfd;
 					if(epoll_ctl(epollfd, EPOLL_CTL_ADD, clientfd, &event) == -1){
 						printf("epoll_ctl, clienttfd");
@@ -202,7 +235,7 @@ int main(int argc, char *argv[]){
 			}else{
 				int clientfd = events[i].data.fd;
 
-				socket_loop(clientfd, argv[1], &context.read_flag);
+				socket_loop(clientfd, argv[1]);
 
 				epoll_ctl(epollfd, EPOLL_CTL_DEL, clientfd, NULL);
 			}
@@ -263,7 +296,7 @@ int set_nonblocking(int socketfd){
 		return 0;
 }
 
-void socket_loop(int clientfd, char *filename, int *read_flag){
+void socket_loop(int clientfd, char *filename){
 
 		char request[4096];
 		int receive_size = recv(clientfd, request, sizeof(request) - 1, 0);
@@ -291,20 +324,7 @@ void socket_loop(int clientfd, char *filename, int *read_flag){
 			const char *initial = ": connected\n\n";
 			send(clientfd, initial, strlen(initial), 0);
 
-			while(1){
-				if(__atomic_exchange_n(read_flag, 0, __ATOMIC_SEQ_CST) == 1){
-					const char *message = "data: reload\n\n";
-					if(send(clientfd, message, strlen(message), 0) <= 0){
-						printf("cleint dc during reload \n");
-						break;
-					};
-					printf("gonna reload \n");
-					break;
-				}
-				struct timespec ts = {0, 20 * 1000 * 1000};
-				nanosleep(&ts, NULL);
-			}
-			close(clientfd);
+			client_add(clientfd);
 			return;
 		}
 
