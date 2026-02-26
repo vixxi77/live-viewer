@@ -189,9 +189,24 @@ int main(int argc, char *argv[]){
 						perror("failed to accept client \n");
 						break;
 					}
+					set_nonblocking(clientfd);
 					socket_loop(clientfd, argv[1], &context.read_flag);
+					
+					event.events = EPOLLIN | EPOLLET;
+					event.data.fd = clientfd;
+					if(epoll_ctl(epollfd, EPOLL_CTL_ADD, clientfd, &event) == -1){
+						printf("epoll_ctl, clienttfd");
+						close(clientfd);
+					}
 				}
+			}else{
+				int clientfd = events[i].data.fd;
+
+				socket_loop(clientfd, argv[1], &context.read_flag);
+
+				epoll_ctl(epollfd, EPOLL_CTL_DEL, clientfd, NULL);
 			}
+
 		}
 
 	}
@@ -252,7 +267,12 @@ void socket_loop(int clientfd, char *filename, int *read_flag){
 
 		char request[4096];
 		int receive_size = recv(clientfd, request, sizeof(request) - 1, 0);
-		if(receive_size <= 0){
+		if(receive_size == -1){
+			if(errno == EAGAIN || errno == EWOULDBLOCK) return;
+			close(clientfd);
+			return;
+		}
+		if(receive_size == 0){
 			close(clientfd);
 			return;
 		}
